@@ -1,0 +1,358 @@
+version: '3.8'
+
+services:
+  # Nginx reverse proxy
+  nginx:
+    image: nginx:alpine
+    container_name: garipamoja_nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/ssl:ro
+      - static_volume:/app/static
+      - media_volume:/app/media
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      - backend
+      - ai-services
+      - frontend
+    networks:
+      - garipamoja_network
+    restart: unless-stopped
+
+  # Django backend
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: garipamoja_backend
+    environment:
+      - DJANGO_SETTINGS_MODULE=garipamoja.settings
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - SECRET_KEY=${SECRET_KEY}
+      - DEBUG=False
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS}
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}
+      - MPESA_CONSUMER_KEY=${MPESA_CONSUMER_KEY}
+      - MPESA_CONSUMER_SECRET=${MPESA_CONSUMER_SECRET}
+      - MPESA_PASSKEY=${MPESA_PASSKEY}
+      - MPESA_ENVIRONMENT=${MPESA_ENVIRONMENT}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_STORAGE_BUCKET_NAME=${AWS_STORAGE_BUCKET_NAME}
+      - AWS_S3_REGION_NAME=${AWS_S3_REGION_NAME}
+    volumes:
+      - static_volume:/app/static
+      - media_volume:/app/media
+      - backend_logs:/app/logs
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - garipamoja_network
+    restart: unless-stopped
+    deploy:
+      replicas: 3
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # AI Services
+  ai-services:
+    build:
+      context: ../ai-services
+      dockerfile: Dockerfile
+    container_name: garipamoja_ai_services
+    environment:
+      - REDIS_URL=${REDIS_URL}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - LOG_LEVEL=INFO
+    volumes:
+      - ai_services_logs:/app/logs
+    depends_on:
+      - redis
+    networks:
+      - garipamoja_network
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+
+  # Frontend React app
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: garipamoja_frontend
+    environment:
+      - REACT_APP_API_URL=${REACT_APP_API_URL}
+      - REACT_APP_AI_SERVICES_URL=${REACT_APP_AI_SERVICES_URL}
+      - REACT_APP_STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
+      - REACT_APP_GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}
+    networks:
+      - garipamoja_network
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # PostgreSQL database
+  postgres:
+    image: postgres:15-alpine
+    container_name: garipamoja_postgres
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - postgres_logs:/var/log/postgresql
+    networks:
+      - garipamoja_network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+
+  # Redis cache and session store
+  redis:
+    image: redis:7-alpine
+    container_name: garipamoja_redis
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+      - redis_logs:/var/log/redis
+    networks:
+      - garipamoja_network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 512M
+
+  # Celery worker for background tasks
+  celery_worker:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: garipamoja_celery_worker
+    command: celery -A garipamoja worker -l info
+    environment:
+      - DJANGO_SETTINGS_MODULE=garipamoja.settings
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - SECRET_KEY=${SECRET_KEY}
+      - DEBUG=False
+    volumes:
+      - static_volume:/app/static
+      - media_volume:/app/media
+      - celery_logs:/app/logs
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - garipamoja_network
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Celery beat for scheduled tasks
+  celery_beat:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: garipamoja_celery_beat
+    command: celery -A garipamoja beat -l info
+    environment:
+      - DJANGO_SETTINGS_MODULE=garipamoja.settings
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - SECRET_KEY=${SECRET_KEY}
+      - DEBUG=False
+    volumes:
+      - celery_beat_logs:/app/logs
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - garipamoja_network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # Monitoring - Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: garipamoja_prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - garipamoja_network
+    restart: unless-stopped
+
+  # Monitoring - Grafana
+  grafana:
+    image: grafana/grafana:latest
+    container_name: garipamoja_grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+      - prometheus
+    networks:
+      - garipamoja_network
+    restart: unless-stopped
+
+  # Log aggregation - ELK Stack
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.8.0
+    container_name: garipamoja_elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - garipamoja_network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.8.0
+    container_name: garipamoja_kibana
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    depends_on:
+      - elasticsearch
+    networks:
+      - garipamoja_network
+    restart: unless-stopped
+
+  # Backup service
+  backup:
+    image: postgres:15-alpine
+    container_name: garipamoja_backup
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_HOST=postgres
+    volumes:
+      - backup_data:/backup
+      - ./backup_script.sh:/backup_script.sh:ro
+    depends_on:
+      - postgres
+    networks:
+      - garipamoja_network
+    restart: unless-stopped
+    command: sh -c "while true; do sleep 86400; /backup_script.sh; done"
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  static_volume:
+    driver: local
+  media_volume:
+    driver: local
+  backup_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  elasticsearch_data:
+    driver: local
+  nginx_logs:
+    driver: local
+  backend_logs:
+    driver: local
+  ai_services_logs:
+    driver: local
+  celery_logs:
+    driver: local
+  celery_beat_logs:
+    driver: local
+  postgres_logs:
+    driver: local
+  redis_logs:
+    driver: local
+
+networks:
+  garipamoja_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16 
