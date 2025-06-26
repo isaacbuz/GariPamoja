@@ -1,15 +1,57 @@
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import React, { useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  RefreshControl,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Button } from 'react-native-paper';
+import { Button, ActivityIndicator } from 'react-native-paper';
+import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '@hooks/useAuth';
+import { useCars } from '@hooks/useCars';
+import CarCard from '@components/CarCard';
 
 export default function HomeScreen() {
+  const navigation = useNavigation<any>();
   const { user, logout } = useAuth();
+  const {
+    featuredCars,
+    isLoading,
+    error,
+    loadFeaturedCars,
+    loadCarDetails,
+  } = useCars();
+
+  useEffect(() => {
+    loadFeaturedCars();
+  }, []);
+
+  const handleCarPress = (carId: string) => {
+    loadCarDetails(carId);
+  };
+
+  const handleSearchPress = () => {
+    navigation.navigate('Search');
+  };
+
+  const handleBookingsPress = () => {
+    navigation.navigate('Bookings');
+  };
+
+  const onRefresh = () => {
+    loadFeaturedCars();
+  };
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={
+          <RefreshControl refreshing={isLoading} onRefresh={onRefresh} />
+        }
+      >
         <View style={styles.header}>
           <Text style={styles.title}>Welcome to GariPamoja</Text>
           <Text style={styles.subtitle}>
@@ -22,7 +64,7 @@ export default function HomeScreen() {
           <View style={styles.actionButtons}>
             <Button
               mode="contained"
-              onPress={() => console.log('Search cars')}
+              onPress={handleSearchPress}
               style={styles.actionButton}
               icon="magnify"
             >
@@ -30,7 +72,7 @@ export default function HomeScreen() {
             </Button>
             <Button
               mode="outlined"
-              onPress={() => console.log('View bookings')}
+              onPress={handleBookingsPress}
               style={styles.actionButton}
               icon="calendar-check"
             >
@@ -40,17 +82,45 @@ export default function HomeScreen() {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Recent Activity</Text>
-          <View style={styles.placeholder}>
-            <Text style={styles.placeholderText}>No recent activity</Text>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Featured Cars</Text>
+            <Button
+              mode="text"
+              onPress={handleSearchPress}
+              compact
+            >
+              View All
+            </Button>
           </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Featured Cars</Text>
-          <View style={styles.placeholder}>
-            <Text style={styles.placeholderText}>Featured cars coming soon</Text>
-          </View>
+          
+          {isLoading && featuredCars.length === 0 ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#2563EB" />
+              <Text style={styles.loadingText}>Loading featured cars...</Text>
+            </View>
+          ) : error ? (
+            <View style={styles.errorContainer}>
+              <Text style={styles.errorText}>{error}</Text>
+              <Button mode="outlined" onPress={onRefresh}>
+                Retry
+              </Button>
+            </View>
+          ) : featuredCars.length > 0 ? (
+            featuredCars.map((car) => (
+              <CarCard
+                key={car.id}
+                car={car}
+                onPress={() => handleCarPress(car.id)}
+              />
+            ))
+          ) : (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>No featured cars available</Text>
+              <Button mode="outlined" onPress={handleSearchPress}>
+                Browse Cars
+              </Button>
+            </View>
+          )}
         </View>
 
         <Button
@@ -88,13 +158,18 @@ const styles = StyleSheet.create({
     color: '#6B7280',
   },
   section: {
-    marginBottom: 24,
+    marginBottom: 32,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
   },
   sectionTitle: {
     fontSize: 20,
     fontWeight: '600',
     color: '#374151',
-    marginBottom: 16,
   },
   actionButtons: {
     gap: 12,
@@ -102,17 +177,33 @@ const styles = StyleSheet.create({
   actionButton: {
     marginBottom: 8,
   },
-  placeholder: {
-    backgroundColor: '#fff',
-    padding: 24,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
+  loadingContainer: {
     alignItems: 'center',
+    padding: 32,
   },
-  placeholderText: {
+  loadingText: {
+    marginTop: 16,
     color: '#6B7280',
     fontSize: 16,
+  },
+  errorContainer: {
+    alignItems: 'center',
+    padding: 32,
+  },
+  errorText: {
+    color: '#ef4444',
+    fontSize: 16,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    padding: 32,
+  },
+  emptyText: {
+    color: '#6B7280',
+    fontSize: 16,
+    marginBottom: 16,
   },
   logoutButton: {
     marginTop: 16,
