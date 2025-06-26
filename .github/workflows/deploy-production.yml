@@ -1,0 +1,189 @@
+name: Deploy to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to deploy (e.g., v1.0.0)'
+        required: true
+        type: string
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - production
+          - staging
+
+env:
+  AWS_REGION: eu-west-1
+  ECR_REPOSITORY_BACKEND: garipamoja-backend
+  ECR_REPOSITORY_AI: garipamoja-ai-services
+  ECS_CLUSTER: garipamoja-cluster
+
+jobs:
+  pre-deployment-checks:
+    runs-on: ubuntu-latest
+    outputs:
+      proceed: ${{ steps.check.outputs.proceed }}
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Validate version tag
+      id: check
+      run: |
+        if git rev-parse "${{ github.event.inputs.version }}" >/dev/null 2>&1; then
+          echo "Version tag exists"
+          echo "proceed=true" >> $GITHUB_OUTPUT
+        else
+          echo "Version tag does not exist"
+          echo "proceed=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+    
+    - name: Check deployment readiness
+      run: |
+        echo "Checking deployment readiness..."
+        echo "Target version: ${{ github.event.inputs.version }}"
+        echo "Target environment: ${{ github.event.inputs.environment }}"
+
+  manual-approval:
+    needs: pre-deployment-checks
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    if: needs.pre-deployment-checks.outputs.proceed == 'true'
+    
+    steps:
+    - name: Deployment approval required
+      run: |
+        echo "Deployment to ${{ github.event.inputs.environment }} requires manual approval"
+        echo "Please review the deployment details and approve in GitHub Actions"
+
+  deploy:
+    needs: manual-approval
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        ref: ${{ github.event.inputs.version }}
+    
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+    
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v1
+    
+    - name: Deploy Backend to ECS
+      run: |
+        # Update task definition with new image
+        TASK_DEFINITION=$(aws ecs describe-task-definition \
+          --task-definition garipamoja-backend \
+          --query taskDefinition)
+        
+        NEW_TASK_DEF=$(echo $TASK_DEFINITION | \
+          jq --arg IMAGE "${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_BACKEND }}:${{ github.event.inputs.version }}" \
+          '.containerDefinitions[0].image = $IMAGE | del(.taskDefinitionArn) | del(.revision) | del(.status) | del(.requiresAttributes) | del(.compatibilities)')
+        
+        # Register new task definition
+        NEW_TASK_ARN=$(aws ecs register-task-definition \
+          --cli-input-json "$NEW_TASK_DEF" \
+          --query 'taskDefinition.taskDefinitionArn' \
+          --output text)
+        
+        # Update service
+        aws ecs update-service \
+          --cluster ${{ env.ECS_CLUSTER }} \
+          --service backend \
+          --task-definition $NEW_TASK_ARN \
+          --force-new-deployment
+    
+    - name: Deploy AI Services to ECS
+      run: |
+        # Update task definition with new image
+        TASK_DEFINITION=$(aws ecs describe-task-definition \
+          --task-definition garipamoja-ai-services \
+          --query taskDefinition)
+        
+        NEW_TASK_DEF=$(echo $TASK_DEFINITION | \
+          jq --arg IMAGE "${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_AI }}:${{ github.event.inputs.version }}" \
+          '.containerDefinitions[0].image = $IMAGE | del(.taskDefinitionArn) | del(.revision) | del(.status) | del(.requiresAttributes) | del(.compatibilities)')
+        
+        # Register new task definition
+        NEW_TASK_ARN=$(aws ecs register-task-definition \
+          --cli-input-json "$NEW_TASK_DEF" \
+          --query 'taskDefinition.taskDefinitionArn' \
+          --output text)
+        
+        # Update service
+        aws ecs update-service \
+          --cluster ${{ env.ECS_CLUSTER }} \
+          --service ai-services \
+          --task-definition $NEW_TASK_ARN \
+          --force-new-deployment
+    
+    - name: Wait for deployment to complete
+      run: |
+        echo "Waiting for backend deployment..."
+        aws ecs wait services-stable \
+          --cluster ${{ env.ECS_CLUSTER }} \
+          --services backend
+        
+        echo "Waiting for AI services deployment..."
+        aws ecs wait services-stable \
+          --cluster ${{ env.ECS_CLUSTER }} \
+          --services ai-services
+    
+    - name: Run post-deployment checks
+      run: |
+        # Check backend health
+        BACKEND_URL=$(aws elbv2 describe-load-balancers \
+          --names garipamoja-alb \
+          --query 'LoadBalancers[0].DNSName' \
+          --output text)
+        
+        curl -f http://$BACKEND_URL/health/ || exit 1
+        curl -f http://$BACKEND_URL/api/v1/health/ || exit 1
+        
+        echo "Deployment completed successfully!"
+    
+    - name: Create deployment record
+      run: |
+        aws dynamodb put-item \
+          --table-name garipamoja-deployments \
+          --item '{
+            "deployment_id": {"S": "'$GITHUB_RUN_ID'"},
+            "version": {"S": "'${{ github.event.inputs.version }}'"},
+            "environment": {"S": "'${{ github.event.inputs.environment }}'"},
+            "timestamp": {"S": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"},
+            "status": {"S": "success"},
+            "deployed_by": {"S": "'$GITHUB_ACTOR'"}
+          }' || true
+    
+    - name: Send deployment notification
+      uses: 8398a7/action-slack@v3
+      if: always()
+      with:
+        status: ${{ job.status }}
+        text: |
+          Deployment to ${{ github.event.inputs.environment }} ${{ job.status }}
+          Version: ${{ github.event.inputs.version }}
+          Deployed by: ${{ github.actor }}
+        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+
+  rollback:
+    needs: deploy
+    runs-on: ubuntu-latest
+    if: failure()
+    
+    steps:
+    - name: Rollback deployment
+      run: |
+        echo "Rolling back deployment..."
+        # Add rollback logic here 
