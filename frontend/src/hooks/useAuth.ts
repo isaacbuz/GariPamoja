@@ -12,10 +12,11 @@ import {
   clearError
 } from '@store/slices/authSlice';
 import { RootState, AppDispatch } from '@store/index';
+import { AuthNavigationProp } from '@navigation/types';
 
 export const useAuth = () => {
   const dispatch = useDispatch<AppDispatch>();
-  const navigation = useNavigation<any>();
+  const navigation = useNavigation<AuthNavigationProp>();
   const authState = useSelector((state: RootState) => state.auth);
 
   // Initialize auth state on app start
@@ -55,13 +56,12 @@ export const useAuth = () => {
         refreshToken: response.refreshToken,
       }));
       
-      // Navigate to main app
-      navigation.navigate('Main');
+      // Navigation will be handled by RootNavigator based on auth state
     } catch (error: any) {
       dispatch(loginFailure(error.message));
       Alert.alert('Login Failed', error.message);
     }
-  }, [dispatch, navigation]);
+  }, [dispatch]);
 
   const register = useCallback(async (userData: RegisterData) => {
     try {
@@ -88,14 +88,13 @@ export const useAuth = () => {
     try {
       await authService.logout();
       dispatch(logoutAction());
-      navigation.navigate('Auth');
+      // Navigation will be handled by RootNavigator based on auth state
     } catch (error) {
       console.error('Logout error:', error);
       // Still logout locally even if API call fails
       dispatch(logoutAction());
-      navigation.navigate('Auth');
     }
-  }, [dispatch, navigation]);
+  }, [dispatch]);
 
   const forgotPassword = useCallback(async (email: string) => {
     try {
@@ -135,12 +134,12 @@ export const useAuth = () => {
       Alert.alert(
         'Success',
         'Your account has been verified successfully.',
-        [{ text: 'OK', onPress: () => navigation.navigate('Main') }]
+        [{ text: 'OK' }] // Navigation will be handled by RootNavigator
       );
     } catch (error: any) {
       Alert.alert('Verification Failed', error.message);
     }
-  }, [authState, dispatch, navigation]);
+  }, [authState, dispatch]);
 
   const resendOTP = useCallback(async (type: 'email' | 'phone' = 'phone') => {
     try {
@@ -173,7 +172,7 @@ export const useAuth = () => {
 // Hook for protected routes
 export const useRequireAuth = () => {
   const { isAuthenticated } = useAuth();
-  const navigation = useNavigation<any>();
+  const navigation = useNavigation<AuthNavigationProp>();
 
   useEffect(() => {
     if (!isAuthenticated) {
