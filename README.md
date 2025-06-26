@@ -226,7 +226,7 @@ This project is proprietary software. All rights reserved.
 ## 📞 Support
 
 - **Email**: support@garipamoja.com
-- **Phone**: +256 XXX XXX XXX
+- **Phone**: +256 700 123 456
 - **AI Chat**: Available 24/7 in the app
 
 ## 🗺️ Roadmap

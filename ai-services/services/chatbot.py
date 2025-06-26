@@ -116,7 +116,7 @@ class ChatbotService:
                 "payment_methods": "We accept mobile money (M-Pesa, Airtel Money), credit/debit cards, and cryptocurrency.",
                 "insurance_coverage": "All rentals include comprehensive insurance coverage up to $50,000.",
                 "verification_process": "KYC verification takes 1-2 business days and requires ID and proof of address.",
-                "support_contact": "Contact support through the app chat, email at support@garipamoja.com, or call +256 XXX XXX XXX."
+                "support_contact": "Contact support through the app chat, email at support@garipamoja.com, or call +256 700 123 456."
             },
             "sw": {
                 "how_to_book": "Kuhifadhi gari, tafuta magari yaliyopo, chagua tarehe zako, na maliza malipo.",
@@ -124,7 +124,7 @@ class ChatbotService:
                 "payment_methods": "Tunakubali pesa ya simu (M-Pesa, Airtel Money), kadi za mkopo/debit, na cryptocurrency.",
                 "insurance_coverage": "Kodi zote zinajumuisha bima kamili hadi $50,000.",
                 "verification_process": "Uthibitishaji wa KYC huchukua siku 1-2 za kazi na unahitaji kitambulisho na uthibitisho wa anwani.",
-                "support_contact": "Wasiliana na msaada kupitia chat ya programu, barua pepe kwa support@garipamoja.com, au piga +256 XXX XXX XXX."
+                "support_contact": "Wasiliana na msaada kupitia chat ya programu, barua pepe kwa support@garipamoja.com, au piga +256 700 123 456."
             }
         }
     

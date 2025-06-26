@@ -496,7 +496,7 @@ pytest tests/
 
 ### Business Support
 - **Email**: business@garipamoja.com
-- **Phone**: +256 XXX XXX XXX
+- **Phone**: +256 700 123 456
 - **Website**: garipamoja.com
 
 ---
